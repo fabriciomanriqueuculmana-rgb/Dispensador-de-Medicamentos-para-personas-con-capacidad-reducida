@@ -1,0 +1,33 @@
+Dispensador de Medicamentos con Arduino
+
+Este proyecto consiste en un dispensador de medicamentos automático utilizando un Arduino UNO y varios sensores. El dispensador abre los servomotores a una hora predefinida, libera la pastilla en un receptáculo y verifica si la pastilla ha sido tomada utilizando sensores infrarrojos y de movimiento. Si la pastilla no es tomada en 5 minutos, una alarma se activa hasta que la pastilla sea tomada.
+
+Requisitos
+El equipo debe estar conectado 24/7 a una toma de corriente para asegurar que funcione correctamente en todo momento.
+
+Componentes
+3 Servomotores
+Arduino UNO
+Sensor infrarrojo FC-51
+Buzzer
+Sensor de movimiento PIR HC-SR501
+RTC DS1307
+
+Funcionamiento
+Hora de toma de pastillas: Cuando llega la hora programada, los servomotores se abren (dependiendo de la pastilla programada) y dejan caer la pastilla en el receptáculo.
+Verificación de toma: El sensor infrarrojo FC-51 detecta si la pastilla ha caído en el receptáculo. Si no se detecta nada, se confirma que la pastilla ha sido tomada.
+Alarma: Si la pastilla no se toma en 5 minutos, el sensor de movimiento PIR HC-SR501 se activa y, al detectar movimiento, activa la alarma (buzzer) hasta que la pastilla sea tomada.
+Repetición de tomas: Las pastillas se toman a las mismas horas todos los días, pero puedes programar que una misma pastilla se tome varias veces al día. Ejemplo: Pastilla 1 por la mañana y noche, Pastilla 2 en la tarde, Pastilla 3 por la tarde y noche.
+
+Energía
+Para funcionar correctamente, el equipo debe estar conectado a una toma corriente que suministre suficiente energía para el Arduino y los sensores. Se recomienda utilizar una fuente de alimentación de 5V y 2A.
+
+Conexiones
+A continuación, se listan las conexiones necesarias para el Arduino UNO:
+Servo 1 (Dispensador pastilla 1): Pin 3
+Servo 2 (Dispensador pastilla 2): Pin 5
+Servo 3 (Dispensador pastilla 3): Pin 6
+Sensor IR FC-51 (Detecta si hay pastilla en el receptáculo): Pin 7
+Sensor PIR HC-SR501 (Detecta movimiento de la persona): Pin 8
+Buzzer (Alarma sonora): Pin 9
+RTC DS1307 (Control horario, I2C): SDA → A4, SCL → A5, VCC común a +5V, GND común a GND
