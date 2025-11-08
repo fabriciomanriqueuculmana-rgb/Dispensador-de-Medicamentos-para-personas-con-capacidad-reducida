@@ -1,0 +1,171 @@
+#include <Wire.h>
+#include <RTClib.h>
+#include <Servo.h>
+
+RTC_DS1307 rtc;
+
+// Servos
+Servo servo1, servo2, servo3;
+#define SERVO1_PIN 3
+#define SERVO2_PIN 5
+#define SERVO3_PIN 6
+
+// Sensores
+#define SENSOR_IR 7
+#define SENSOR_PIR 8
+#define BUZZER 9
+
+// Configuración de horarios (máx. 3 horarios por pastilla)
+int horas1[3]    = {8, 20, -1};
+int minutos1[3]  = {0, 0, -1};
+int cantidad1[3] = {1, 2, -1};
+
+int horas2[3]    = {14, -1, -1};
+int minutos2[3]  = {0, -1, -1};
+int cantidad2[3] = {1, -1, -1};
+
+int horas3[3]    = {14, 21, -1};
+int minutos3[3]  = {0, 0, -1};
+int cantidad3[3] = {1, 1, -1};
+
+// Variables
+bool alarmaActiva = false;
+unsigned long tiempoInicioAlarma = 0;
+
+void setup() {
+  Serial.begin(9600);
+  Wire.begin();
+  rtc.begin();
+
+  servo1.attach(SERVO1_PIN);
+  servo2.attach(SERVO2_PIN);
+  servo3.attach(SERVO3_PIN);
+
+  pinMode(SENSOR_IR, INPUT);
+  pinMode(SENSOR_PIR, INPUT);
+  pinMode(BUZZER, OUTPUT);
+  digitalWrite(BUZZER, LOW);
+
+  if (!rtc.isrunning()) {
+    Serial.println("RTC not set, setting current time...");
+    rtc.adjust(DateTime(F(__DATE__), F(__TIME__))); // Ajuste automático
+  }
+
+  Serial.println("=== DISPENSADOR DE MEDICAMENTOS ===");
+  Serial.println("Comandos disponibles:");
+  Serial.println("1: Ver horarios");
+  Serial.println("2: Cambiar horario (pastilla, indice, hora, minuto, cantidad)");
+}
+
+void loop() {
+  DateTime now = rtc.now();
+
+  verificarPastilla(1, servo1, horas1, minutos1, cantidad1);
+  verificarPastilla(2, servo2, horas2, minutos2, cantidad2);
+  verificarPastilla(3, servo3, horas3, minutos3, cantidad3);
+
+  if (Serial.available()) {
+    int opcion = Serial.parseInt();
+    if (opcion == 1) mostrarHorarios();
+    if (opcion == 2) cambiarHorario();
+  }
+
+  delay(1000);
+}
+
+// --- FUNCIONES ---
+
+void verificarPastilla(int id, Servo &servo, int horasPastilla[], int minutosPastilla[], int cantidadPastilla[]) {
+  DateTime now = rtc.now();
+  int hora = now.hour();
+  int minuto = now.minute();
+
+  for (int i = 0; i < 3; i++) {
+    if (horasPastilla[i] == -1 || minutosPastilla[i] == -1) continue;
+    if (hora == horasPastilla[i] && minuto == minutosPastilla[i]) {
+      dispensar(servo, id, cantidadPastilla[i]);
+      delay(60000); // Evita repetir durante el mismo minuto
+    }
+  }
+}
+
+void dispensar(Servo &servo, int id, int cantidad) {
+  Serial.print("Dispensando pastilla "); Serial.print(id);
+  Serial.print(" ("); Serial.print(cantidad); Serial.println(" unidad/es)");
+
+  // Abrir servo según cantidad
+  for (int i = 0; i < cantidad; i++) {
+    servo.write(90);
+    delay(1000);
+    servo.write(0);
+    delay(1000);
+  }
+
+  activarAlarma();
+
+  unsigned long inicio = millis();
+  while (millis() - inicio < 300000) { // 5 minutos
+    if (!digitalRead(SENSOR_IR)) {
+      Serial.println("Pastilla tomada correctamente.");
+      desactivarAlarma();
+      return;
+    }
+  }
+
+  Serial.println("No se tomó en 5 min. Esperando movimiento...");
+  desactivarAlarma();
+
+  while (true) {
+    if (digitalRead(SENSOR_PIR)) {
+      Serial.println("Movimiento detectado. Reanudando alarma.");
+      activarAlarma();
+      while (digitalRead(SENSOR_IR)) {} 
+      desactivarAlarma();
+      break;
+    }
+  }
+}
+
+void activarAlarma() {
+  alarmaActiva = true;
+  tiempoInicioAlarma = millis();
+  digitalWrite(BUZZER, HIGH);
+}
+
+void desactivarAlarma() {
+  alarmaActiva = false;
+  digitalWrite(BUZZER, LOW);
+}
+
+// --- CONFIGURACIÓN DESDE MONITOR SERIAL ---
+
+void mostrarHorarios() {
+  Serial.println("Horarios actuales:");
+  for (int i = 0; i < 3; i++) {
+    if (horas1[i] != -1)
+      Serial.print("Pastilla 1 -> "), Serial.print(horas1[i]), Serial.print(":"), Serial.print(minutos1[i]), Serial.print("  Cantidad: "), Serial.println(cantidad1[i]);
+    if (horas2[i] != -1)
+      Serial.print("Pastilla 2 -> "), Serial.print(horas2[i]), Serial.print(":"), Serial.print(minutos2[i]), Serial.print("  Cantidad: "), Serial.println(cantidad2[i]);
+    if (horas3[i] != -1)
+      Serial.print("Pastilla 3 -> "), Serial.print(horas3[i]), Serial.print(":"), Serial.print(minutos3[i]), Serial.print("  Cantidad: "), Serial.println(cantidad3[i]);
+  }
+}
+
+void cambiarHorario() {
+  Serial.println("Ingrese: <pastilla> <indice 0-2> <hora> <minuto> <cantidad>");
+  while (Serial.available() == 0);
+  int p = Serial.parseInt();
+  int i = Serial.parseInt();
+  int h = Serial.parseInt();
+  int m = Serial.parseInt();
+  int c = Serial.parseInt();
+
+  if (p == 1) { horas1[i] = h; minutos1[i] = m; cantidad1[i] = c; }
+  if (p == 2) { horas2[i] = h; minutos2[i] = m; cantidad2[i] = c; }
+  if (p == 3) { horas3[i] = h; minutos3[i] = m; cantidad3[i] = c; }
+
+  Serial.print("Horario actualizado para pastilla "); Serial.println(p);
+  mostrarHorarios();
+}
+
+
