@@ -1,11 +1,12 @@
-#include <Wire.h>
-#include <RTClib.h>
-#include <Servo.h>
-#include <EEPROM.h>
+#include <Wire.h>       // Librería para comunicación I2C (usada por el RTC)
+#include <RTClib.h>     // Librería para manejar módulo RTC DS1307
+#include <Servo.h>      // Librería para controlar servomotores
+#include <EEPROM.h>     // Librería para lectura/escritura en la memoria EEPROM
 
 // --- CONFIGURACIÓN GENERAL --------------------------------------------------
-RTC_DS1307 rtc;
+RTC_DS1307 rtc;          // Objeto del RTC DS1307
 
+// Pines de conexiones principales
 constexpr uint8_t SERVO1_PIN = 3;
 constexpr uint8_t SERVO2_PIN = 5;
 constexpr uint8_t SERVO3_PIN = 6;
@@ -13,26 +14,32 @@ constexpr uint8_t SENSOR_IR_PIN = 7;
 constexpr uint8_t SENSOR_PIR_PIN = 8;
 constexpr uint8_t BUZZER_PIN = 9;
 
-constexpr uint8_t NUM_PASTILLAS = 3;
-constexpr uint8_t MAX_EVENTOS = 3;
+// Configuración de funcionamiento del sistema
+constexpr uint8_t NUM_PASTILLAS = 3;      // Cantidad de compartimientos
+constexpr uint8_t MAX_EVENTOS = 3;        // Horarios por cada pastilla
 
+// Posiciones del servo
 constexpr int SERVO_CERRADO = 0;
 constexpr int SERVO_ABIERTO = 90;
+
+// Tiempos de operación
 constexpr unsigned long TIEMPO_SERVO_ABIERTO_MS = 1200;
 constexpr unsigned long TIEMPO_ENTRE_PASTILLAS_MS = 800;
 constexpr unsigned long INTERVALO_VERIFICACION_MS = 250;
-constexpr unsigned long TIEMPO_MAX_ALARMA_MS = 15000UL; // ✅ 15 segundos
+constexpr unsigned long TIEMPO_MAX_ALARMA_MS = 15000UL;  // Duración máxima de alarma
 
-constexpr unsigned long NUNCA_DISPENSADO = 0xFFFFFFFFUL;
+constexpr unsigned long NUNCA_DISPENSADO = 0xFFFFFFFFUL; // Valor especial
 
 // --- ESTRUCTURA DE DATOS ----------------------------------------------------
+// Estructura para cada horario programado de dispensación
 struct EventoDispensacion {
   int hora;
   int minuto;
-  uint8_t cantidad;
+  uint8_t cantidad;  // Número de pastillas a dispensar
 };
 
 // --- DIRECCIONES EEPROM -----------------------------------------------------
+// Cada pastilla tiene un bloque exclusivo dentro de la EEPROM
 int EEPROM_ADDR_P1 = 0;
 int EEPROM_ADDR_P2 = EEPROM_ADDR_P1 + sizeof(EventoDispensacion) * MAX_EVENTOS;
 int EEPROM_ADDR_P3 = EEPROM_ADDR_P2 + sizeof(EventoDispensacion) * MAX_EVENTOS;
@@ -41,7 +48,7 @@ int EEPROM_ADDR_P3 = EEPROM_ADDR_P2 + sizeof(EventoDispensacion) * MAX_EVENTOS;
 EventoDispensacion horariosPastilla1[MAX_EVENTOS] = {
   {8, 0, 1},
   {20, 0, 2},
-  {-1, -1, 0}
+  {-1, -1, 0}        // -1 indica que no hay horario
 };
 
 EventoDispensacion horariosPastilla2[MAX_EVENTOS] = {
@@ -56,14 +63,20 @@ EventoDispensacion horariosPastilla3[MAX_EVENTOS] = {
   {-1, -1, 0}
 };
 
+// Servos de cada compartimiento
 Servo servos[NUM_PASTILLAS];
+
+// Registro de última dispensación (por minuto)
 unsigned long ultimaDispensacion[NUM_PASTILLAS][MAX_EVENTOS];
+
+// Control de estados
 bool yaDispensado[NUM_PASTILLAS] = {false, false, false};
 bool bloqueoDispensacion = false;
 
-uint8_t dispensacionesPendientes = 0;
+uint8_t dispensacionesPendientes = 0; // Cuántas pastillas ya cayeron en el minuto actual
 
 // --- PROTOTIPOS -------------------------------------------------------------
+// Declaración de funciones
 void verificarPastilla(uint8_t indicePastilla, Servo &servo, EventoDispensacion horarios[], const DateTime &ahora);
 void dispensarPastilla(uint8_t indicePastilla, Servo &servo, uint8_t cantidad);
 void gestionarAlarma();
@@ -82,28 +95,34 @@ bool datosEEPROMValidos();
 
 // --- SETUP ------------------------------------------------------------------
 void setup() {
-  Serial.begin(9600);
-  Wire.begin();
-  rtc.begin();
+  Serial.begin(9600);  // Comunicación serial
+  Wire.begin();        // Iniciar bus I2C
+  rtc.begin();         // Iniciar reloj RTC
 
+  // Si el RTC no está funcionando, se ajusta con la hora del PC al momento de cargar el código
   if (!rtc.isrunning()) {
     rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
     Serial.println("RTC configurado automáticamente.");
   }
 
+  // Vincular los servos a sus pines
   const uint8_t pinesServo[NUM_PASTILLAS] = {SERVO1_PIN, SERVO2_PIN, SERVO3_PIN};
   for (uint8_t i = 0; i < NUM_PASTILLAS; ++i) {
     servos[i].attach(pinesServo[i]);
     servos[i].write(SERVO_CERRADO);
+
+    // Inicializar registro de última dispensación
     for (uint8_t j = 0; j < MAX_EVENTOS; ++j)
       ultimaDispensacion[i][j] = NUNCA_DISPENSADO;
   }
 
+  // Configurar sensores y buzzer
   pinMode(SENSOR_IR_PIN, INPUT);
   pinMode(SENSOR_PIR_PIN, INPUT);
   pinMode(BUZZER_PIN, OUTPUT);
   digitalWrite(BUZZER_PIN, LOW);
 
+  // Verificar si existen horarios guardados en EEPROM
   if (datosEEPROMValidos()) {
     cargarHorariosEEPROM();
     Serial.println("📂 Horarios cargados desde EEPROM.");
@@ -116,12 +135,15 @@ void setup() {
 
 // --- LOOP ------------------------------------------------------------------
 void loop() {
+  // Obtener hora actual
   DateTime ahora = rtc.now();
 
+  // Verificar cada pastilla
   verificarPastilla(0, servos[0], horariosPastilla1, ahora);
   verificarPastilla(1, servos[1], horariosPastilla2, ahora);
   verificarPastilla(2, servos[2], horariosPastilla3, ahora);
 
+  // Resetear estado cada nuevo minuto
   static unsigned long minutoAnterior = 0;
   unsigned long minutoActual = ahora.unixtime() / 60UL;
 
@@ -132,7 +154,7 @@ void loop() {
     minutoAnterior = minutoActual;
   }
 
-  // calcular cuántas pastillas deberían dispensarse este minuto
+  // Calcular cuántas pastillas deberían caer este minuto
   uint8_t totalProgramado = 0;
   for (uint8_t p = 0; p < NUM_PASTILLAS; p++) {
     EventoDispensacion *h = obtenerHorarios(p);
@@ -142,6 +164,7 @@ void loop() {
     }
   }
 
+  // Cuando todas las pastillas programadas ya cayeron → activar alarma
   if (!bloqueoDispensacion && totalProgramado > 0 && dispensacionesPendientes == totalProgramado) {
     Serial.println("✅ Todas las pastillas dispensadas, iniciando alarma");
     bloqueoDispensacion = true;
@@ -154,13 +177,15 @@ void loop() {
 }
 
 // --- FUNCIONES PRINCIPALES --------------------------------------------------
+
+// Verifica si una pastilla debe ser dispensada en este minuto
 void verificarPastilla(uint8_t indicePastilla, Servo &servo, EventoDispensacion horarios[], const DateTime &ahora) {
 
-  if (bloqueoDispensacion) return;
+  if (bloqueoDispensacion) return; // Alarma activa → detener dispensación
 
   const unsigned long minutoActual = ahora.unixtime() / 60UL;
 
-  // ✅ calcular totalProgramado dentro de esta función
+  // Calcular cuántas pastillas están programadas para este minuto
   uint8_t totalProgramado = 0;
   for (uint8_t p = 0; p < NUM_PASTILLAS; p++) {
     EventoDispensacion *h = obtenerHorarios(p);
@@ -170,24 +195,27 @@ void verificarPastilla(uint8_t indicePastilla, Servo &servo, EventoDispensacion 
     }
   }
 
+  // Revisar cada horario configurado de la pastilla actual
   for (uint8_t i = 0; i < MAX_EVENTOS; ++i) {
     EventoDispensacion &ev = horarios[i];
-    if (ev.hora < 0 || ev.minuto < 0 || ev.cantidad == 0) continue;
+
+    if (ev.hora < 0 || ev.minuto < 0 || ev.cantidad == 0) continue; // Horario vacío
 
     if (ev.hora == ahora.hour() && ev.minuto == ahora.minute()) {
 
-      // ✅ evitar doble dispensado
+      // Evitar doble dispensado
       if (ultimaDispensacion[indicePastilla][i] == minutoActual) return;
       if (yaDispensado[indicePastilla]) return;
 
-      // ✅ registrar antes de dispensar
+      // Registrar dispensación
       ultimaDispensacion[indicePastilla][i] = minutoActual;
       yaDispensado[indicePastilla] = true;
       dispensacionesPendientes++;
 
+      // Dispensar pastilla
       dispensarPastilla(indicePastilla, servo, ev.cantidad);
 
-      // ✅ activar alarma inmediatamente cuando ya cayeron todas
+      // Si todas las pastillas ya cayeron → activar alarma
       if (dispensacionesPendientes == totalProgramado) {
         Serial.println("✅ Todas las pastillas dispensadas, iniciando alarma");
         bloqueoDispensacion = true;
@@ -200,6 +228,7 @@ void verificarPastilla(uint8_t indicePastilla, Servo &servo, EventoDispensacion 
   }
 }
 
+// Dispensación física de pastilla(s)
 void dispensarPastilla(uint8_t indicePastilla, Servo &servo, uint8_t cantidad) {
   Serial.print("Dispensando pastilla ");
   Serial.print(indicePastilla + 1);
@@ -215,10 +244,13 @@ void dispensarPastilla(uint8_t indicePastilla, Servo &servo, uint8_t cantidad) {
   }
 }
 
-// ✅ ALARMA COMPLETA
+// --- SISTEMA DE ALARMA ------------------------------------------------------
+
+// Lógica completa para gestionar la alarma
 void gestionarAlarma() {
   unsigned long inicio = millis();
 
+  // Primera fase: sonar hasta 15 segundos o hasta que retiren la pastilla
   while (millis() - inicio < TIEMPO_MAX_ALARMA_MS) {
     if (!hayPastillaEnReceptaculo()) {
       Serial.println("✅ Pastilla retirada - alarma OFF");
@@ -228,6 +260,7 @@ void gestionarAlarma() {
     delay(INTERVALO_VERIFICACION_MS);
   }
 
+  // Segunda fase: esperar movimiento
   desactivarAlarma();
   Serial.println("⏳ No retiró - esperando movimiento");
 
@@ -236,6 +269,7 @@ void gestionarAlarma() {
       Serial.println("👤 Movimiento detectado - reactivando alarma");
       activarAlarma();
 
+      // Alarma sigue hasta que retiren la pastilla
       while (hayPastillaEnReceptaculo()) {
         delay(INTERVALO_VERIFICACION_MS);
       }
@@ -251,6 +285,7 @@ void gestionarAlarma() {
 // --- ALARMA CONTROL ---------------------------------------------------------
 void activarAlarma() { digitalWrite(BUZZER_PIN, HIGH); }
 void desactivarAlarma() { digitalWrite(BUZZER_PIN, LOW); }
+
 bool hayPastillaEnReceptaculo() { return digitalRead(SENSOR_IR_PIN) == LOW; }
 bool hayMovimientoPersona() { return digitalRead(SENSOR_PIR_PIN) == HIGH; }
 
@@ -274,28 +309,34 @@ void atenderComandosSerial() {
 }
 
 // --- EEPROM ---------------------------------------------------------------
+
+// Guardar horarios en EEPROM
 void guardarHorariosEEPROM() {
   EEPROM.put(EEPROM_ADDR_P1, horariosPastilla1);
   EEPROM.put(EEPROM_ADDR_P2, horariosPastilla2);
   EEPROM.put(EEPROM_ADDR_P3, horariosPastilla3);
-  EEPROM.put(300, 0xBEEF);
+  EEPROM.put(300, 0xBEEF);  // Marca de validez
   Serial.println("💾 Horarios guardados en EEPROM.");
 }
 
+// Cargar horarios desde EEPROM
 void cargarHorariosEEPROM() {
   EEPROM.get(EEPROM_ADDR_P1, horariosPastilla1);
   EEPROM.get(EEPROM_ADDR_P2, horariosPastilla2);
   EEPROM.get(EEPROM_ADDR_P3, horariosPastilla3);
 }
 
+// Verificar si los datos de EEPROM son válidos
 bool datosEEPROMValidos() {
   int marcador;
   EEPROM.get(300, marcador);
   return (marcador == 0xBEEF);
 }
 
+// Mostrar horarios actuales
 void mostrarHorarios() {
   Serial.println("=== HORARIOS ACTUALES ===");
+
   for (uint8_t p = 0; p < NUM_PASTILLAS; p++) {
     EventoDispensacion *h = obtenerHorarios(p);
     Serial.print("Pastilla "); Serial.println(p + 1);
@@ -317,16 +358,19 @@ void mostrarHorarios() {
   }
 }
 
+// Cambiar o eliminar un horario
 void cambiarHorario() {
   Serial.println("Formato: pastilla indice hora minuto cantidad");
   while (Serial.available() == 0);
 
+  // Leer valores
   int past = Serial.parseInt();
   int idx = Serial.parseInt();
   int h = Serial.parseInt();
   int m = Serial.parseInt();
   int c = Serial.parseInt();
 
+  // Validaciones básicas
   if (past < 1 || past > 3 || idx < 0 || idx > 2) {
     Serial.println("Parámetros inválidos.");
     limpiarBufferSerial();
@@ -336,23 +380,27 @@ void cambiarHorario() {
   EventoDispensacion *tabla = obtenerHorarios(past - 1);
   EventoDispensacion &ev = tabla[idx];
 
+  // Si se ingresan valores negativos → borrar horario
   if (h < 0 || m < 0 || c <= 0) {
     ev.hora = -1; ev.minuto = -1; ev.cantidad = 0;
     Serial.println("Horario eliminado.");
   } else {
+    // Colocar nuevos valores
     ev.hora = constrain(h, 0, 23);
     ev.minuto = constrain(m, 0, 59);
     ev.cantidad = constrain(c, 1, 10);
     Serial.println("Horario actualizado.");
   }
 
-  ultimaDispensacion[past - 1][idx] = NUNCA_DISPENSADO;
+  ultimaDispensacion[past - 1][idx] = NUNCA_DISPENSADO; // Resetear dispensación
   guardarHorariosEEPROM();
   mostrarHorarios();
   limpiarBufferSerial();
 }
 
 // --- AUXILIARES ------------------------------------------------------------
+
+// Seleccionar tabla de horarios según pastilla
 EventoDispensacion *obtenerHorarios(uint8_t indicePastilla) {
   switch (indicePastilla) {
     case 0: return horariosPastilla1;
@@ -361,6 +409,7 @@ EventoDispensacion *obtenerHorarios(uint8_t indicePastilla) {
   }
 }
 
+// Limpiar buffer serial
 void limpiarBufferSerial() {
   while (Serial.available()) Serial.read();
 }
