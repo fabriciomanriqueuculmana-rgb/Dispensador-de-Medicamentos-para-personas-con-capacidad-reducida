@@ -1,33 +1,129 @@
-Dispensador de Medicamentos con Arduino
+Dispensador Automático de Medicamentos con Arduino
+📌 Descripción del Proyecto
 
-Este proyecto consiste en un dispensador de medicamentos automático utilizando un Arduino UNO y varios sensores. El dispensador abre los servomotores a una hora predefinida, libera la pastilla en un receptáculo y verifica si la pastilla ha sido tomada utilizando sensores infrarrojos y de movimiento. Si la pastilla no es tomada en 5 minutos, una alarma se activa hasta que la pastilla sea tomada.
+Este proyecto consiste en un dispensador automático de medicamentos diseñado para personas con capacidades reducidas. El sistema permite:
+Programar horarios de administración.
+Dispensar 1 a 3 tipos de pastillas mediante servomotores.
+Detectar si la pastilla cayó correctamente.
+Activar una alarma si el usuario no recoge la dosis.
+Detectar movimiento humano para reactivar la alarma.
+Guardar horarios en memoria EEPROM para mantenerlos tras desconexión.
+Operar las 24 horas del día.
+Este dispositivo está construido con Arduino Uno, sensores electrónicos y una carcasa impresa en 3D que protege todos los componentes internos.
 
-Requisitos
-El equipo debe estar conectado 24/7 a una toma de corriente para asegurar que funcione correctamente en todo momento.
+🧩 Características Principales
 
-Componentes
-3 Servomotores
-Arduino UNO
-Sensor infrarrojo FC-51
-Buzzer
-Sensor de movimiento PIR HC-SR501
-RTC DS1307
+⏱️ RTC DS1307 para mantener la hora real en todo momento.
+⚙️ 3 servomotores independientes para cada compartimiento.
+👁️ Sensor IR FC-51 para detectar la presencia/ausencia de pastilla.
+🧍 Sensor PIR HC-SR501 para detectar movimiento humano.
+🔊 Buzzer que actúa como alarma sonora.
+💾 EEPROM para guardar horarios incluso después de apagar el sistema.
+📟 Monitor Serial con menú para ver o modificar horarios.
+🛡️ Carcasa 3D integrada (versión física del proyecto).
 
-Funcionamiento
-Hora de toma de pastillas: Cuando llega la hora programada, los servomotores se abren (dependiendo de la pastilla programada) y dejan caer la pastilla en el receptáculo.
-Verificación de toma: El sensor infrarrojo FC-51 detecta si la pastilla ha caído en el receptáculo. Si no se detecta nada, se confirma que la pastilla ha sido tomada.
-Alarma: Si la pastilla no se toma en 5 minutos, el sensor de movimiento PIR HC-SR501 se activa y, al detectar movimiento, activa la alarma (buzzer) hasta que la pastilla sea tomada.
-Repetición de tomas: Las pastillas se toman a las mismas horas todos los días, pero puedes programar que una misma pastilla se tome varias veces al día. Ejemplo: Pastilla 1 por la mañana y noche, Pastilla 2 en la tarde, Pastilla 3 por la tarde y noche.
+🔧 Componentes Utilizados
+Componente	Cantidad
+Arduino Uno	1
+Servomotores SG90	3
+Sensor IR FC-51	1
+Sensor PIR HC-SR501	1
+Módulo RTC DS1307 (I2C)	1
+Buzzer	1
+Cables Dupont	varios
+Fuente 5V estable	1
+Carcasa 3D personalizada	1
 
-Energía
-Para funcionar correctamente, el equipo debe estar conectado a una toma corriente que suministre suficiente energía para el Arduino y los sensores. Se recomienda utilizar una fuente de alimentación de 5V y 2A.
+🔌 Conexiones Principales
+Servomotores
+Servo 1 → Pin 3
+Servo 2 → Pin 5
+Servo 3 → Pin 6
+Sensores
+Sensor IR FC-51 → Pin 7
+Sensor PIR HC-SR501 → Pin 8
+Alarma
+Buzzer → Pin 9
+RTC DS1307 (I2C)
+SDA → A4
+SCL → A5
+VCC → 5V
+GND → GND
 
-Conexiones
-A continuación, se listan las conexiones necesarias para el Arduino UNO:
-Servo 1 (Dispensador pastilla 1): Pin 3
-Servo 2 (Dispensador pastilla 2): Pin 5
-Servo 3 (Dispensador pastilla 3): Pin 6
-Sensor IR FC-51 (Detecta si hay pastilla en el receptáculo): Pin 7
-Sensor PIR HC-SR501 (Detecta movimiento de la persona): Pin 8
-Buzzer (Alarma sonora): Pin 9
-RTC DS1307 (Control horario, I2C): SDA → A4, SCL → A5, VCC común a +5V, GND común a GND
+🧠 Lógica de Funcionamiento
+1. Programación de horarios
+
+Cada pastilla puede tener hasta 3 horarios usando la estructura:
+
+struct EventoDispensacion {
+  int hora;
+  int minuto;
+  uint8_t cantidad;
+};
+
+2. Dispensación
+
+A la hora programada:
+Se verifica si ya se dispensó ese minuto.
+Se abre el servo correspondiente.
+Caen las pastillas según la cantidad establecida.
+Se registra el evento para evitar duplicados.
+
+3. Activación de alarma
+
+La alarma se activa cuando:
+Todas las pastillas programadas del minuto ya cayeron.
+El sensor IR detecta que la pastilla sigue en el receptáculo.
+
+4. Lógica completa de alarma
+
+Suena por un máximo de 15 segundos.
+Si el usuario retira la pastilla, la alarma se apaga.
+Si no la retira, se espera a que el PIR detecte movimiento.
+Cuando hay movimiento, la alarma vuelve a sonar hasta que la pastilla sea retirada.
+
+🖥️ Menú Serial
+El monitor serial permite ejecutar las siguientes opciones:
+
+Opción	Descripción
+1	Mostrar horarios actuales
+2	Cambiar o eliminar un horario
+
+Formato del comando para editar:
+pastilla  índice  hora  minuto  cantidad
+Ejemplo:
+1 0 8 30 1
+(actualiza la pastilla 1 → horario 0 → 08:30 → 1 unidad)
+
+🧾 Memoria EEPROM
+Los horarios se guardan automáticamente con EEPROM.put().
+Se utiliza una marca de validación 0xBEEF para asegurar que los datos sean correctos.
+Si los datos no existen o están corruptos, se cargan los valores por defecto.
+
+🏗️ Carcasa 3D
+
+El proyecto cuenta con una carcasa física diseñada especialmente para:
+Sujetar los servos y sensores.
+Tener bandejas para cada tipo de pastilla.
+Proteger las conexiones.
+Mejorar la ergonomía y seguridad para el usuario final.
+(Aquí puedes colocar imágenes si las subes al repositorio)
+
+▶️ Cómo usar el proyecto
+
+Cargar el código al Arduino.
+Ajustar la hora interna del RTC (se configura automáticamente la primera vez).
+Colocar las pastillas en los compartimientos.
+Abrir el monitor serial (9600 baud).
+Configurar horarios.
+Dejar el dispositivo conectado a una fuente estable.
+
+📂 Código Fuente
+
+El archivo principal del proyecto incluye:
+Lógica de horarios.
+Lectura de sensores.
+Control de servos.
+Manejo de EEPROM.
+Gestión completa de alarma.
+Menú serial interactivo.
